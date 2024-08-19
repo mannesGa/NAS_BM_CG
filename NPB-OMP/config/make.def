@@ -49,15 +49,14 @@ C_INC = -I../common
 #---------------------------------------------------------------------------
 # Global *compile time* flags for C programs
 #---------------------------------------------------------------------------
-CFLAGS	= -O3 -qopenmp -mcmodel=medium
+CFLAGS	= -qopenmp -fopenmp-targets=spir64 -O3 -ipo
 
 
 #---------------------------------------------------------------------------
 # Global *link time* flags. Flags for increasing maximum executable 
 # size usually go here. 
 #---------------------------------------------------------------------------
-CLINKFLAGS = -O3 -qopenmp -mcmodel=medium
-
+CLINKFLAGS = -qopenmp -fopenmp-targets=spir64 -O3 -ipo
 
 #---------------------------------------------------------------------------
 # Utilities C:
@@ -67,7 +66,6 @@ CLINKFLAGS = -O3 -qopenmp -mcmodel=medium
 # there are no separate macros provided for such flags.
 #---------------------------------------------------------------------------
 UCC	= icpx -qopenmp
-
 
 #---------------------------------------------------------------------------
 # Destination of executables, relative to subdirs of the main directory. . 
