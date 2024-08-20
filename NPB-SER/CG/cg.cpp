@@ -485,7 +485,7 @@ static void conj_grad(int colidx[],
 		r[j] = x[j];
 		p[j] = r[j];
 	}
-    #pragma omp target data map(to: r[0:NA+2], q[0:NA+2])\
+    #pragma omp target data map(to: r[0:NA+2], q[0:NA+2], a[0:NZ], rowstr[0:NA+1], colidx[0:NZ])\
                             map(tofrom: z[0:NA+2], p[0:NA+2])
     {
 	/*
@@ -513,17 +513,14 @@ static void conj_grad(int colidx[],
 		 * the unrolled-by-8 version below is significantly faster
 		 * on the Cray t3d - overall speed of code is 1.5 times faster.
 		 */
-        GPU_PRAGMA(omp target update to(p[0:NA+2]))
+        #pragma omp target teams distribute parallel for
         for(j = 0; j < lastrow - firstrow + 1; j++){
 			sum = 0.0;
-            GPU_PRAGMA(omp target teams distribute parallel for reduction(+:sum) nowait)
 			for(k = rowstr[j]; k < rowstr[j+1]; k++){
 				sum = sum + a[k]*p[colidx[k]];
 			}
-            GPU_PRAGMA(omp target update from(sum))
 			q[j] = sum;
         }
-        GPU_PRAGMA(omp target update to(q[0:NA+2]))
 		/*
 		 * --------------------------------------------------------------------
 		 * obtain p.q
@@ -601,13 +598,12 @@ static void conj_grad(int colidx[],
 	 * ---------------------------------------------------------------------
 	 */
 	sum = 0.0;
+    #pragma omp target teams distribute parallel for
 	for(j = 0; j < lastrow - firstrow + 1; j++){
 		d = 0.0;
-        // GPU_PRAGMA(omp target teams distribute parallel for reduction(+:d) nowait)
 		for(k = rowstr[j]; k < rowstr[j+1]; k++){
 			d = d + a[k]*z[colidx[k]];
 		}
-        GPU_PRAGMA(omp target update from(d))
 		r[j] = d;
 	}
 	/*
@@ -615,17 +611,14 @@ static void conj_grad(int colidx[],
 	 * at this point, r contains A.z
 	 * ---------------------------------------------------------------------
 	 */
-    } // end of omp target data
-    GPU_PRAGMA(omp target update to(sum, r[0:NA+2]))
-    GPU_PRAGMA(omp target teams distribute parallel for reduction(+:sum))
+    
+    #pragma omp target teams distribute parallel for reduction(+:sum)
 	for(j = 0; j < lastcol-firstcol+1; j++){
 		d   = x[j] - r[j];
 		sum = sum + d*d;
 	}
-    GPU_PRAGMA(omp target update from(sum))
 	*rnorm = sqrt(sum);
-    
-    GPU_PRAGMA(omp target exit data map(from: r[0:NA+2], p[0:NA+2], q[0:NA+2]))
+    } // end of omp target data
 }
 
 /*
