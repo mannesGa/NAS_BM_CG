@@ -51,11 +51,12 @@ C_INC = -I../common
 #---------------------------------------------------------------------------
 CFLAGS	= -qopenmp -fopenmp-targets=spir64 -O3 -ipo
 
+
 #---------------------------------------------------------------------------
 # Global *link time* flags. Flags for increasing maximum executable 
 # size usually go here. 
 #---------------------------------------------------------------------------
-CFLAGS	= -qopenmp -fopenmp-targets=spir64 -O3 -ipo
+CLINKFLAGS = -qopenmp -fopenmp-targets=spir64 -O3 -ipo
 
 
 #---------------------------------------------------------------------------
@@ -65,7 +66,7 @@ CFLAGS	= -qopenmp -fopenmp-targets=spir64 -O3 -ipo
 # this compiler go here also; typically there are few flags required; hence 
 # there are no separate macros provided for such flags.
 #---------------------------------------------------------------------------
-UCC	= icpx -qopenmp
+UCC	= icpx -qopenmp 
 
 
 #---------------------------------------------------------------------------
