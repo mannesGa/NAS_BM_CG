@@ -72,7 +72,13 @@ Authors of the C++ code:
 #define T_CONJ_GRAD 2
 #define T_LAST 3
 
-#define GPU_OFFLOADING
+#define GPU_OFFLOADING 0
+// Macro that conditionally expands to pragma
+#if GPU_OFFLOADING
+    #define GPU_PRAGMA(pragma) _Pragma(#pragma)
+#else
+    #define GPU_PRAGMA(pragma)
+#endif
 
 /* global variables */
 #if defined(DO_NOT_ALLOCATE_ARRAYS_WITH_DYNAMIC_MEMORY_AND_AS_SINGLE_DIMENSION)
@@ -479,24 +485,19 @@ static void conj_grad(int colidx[],
 		r[j] = x[j];
 		p[j] = r[j];
 	}
-#ifdef GPU_OFFLOADING
-    #pragma omp target enter data map(to: r[0:NA+2], rho, rowstr[0:NA+1], colidx[0:NZ], a[0:NZ], z[0:NA+2], r[0:NA+2])
-#endif
+    #pragma omp target data map(to: r[0:NA+2], q[0:NA+2])\
+                            map(tofrom: z[0:NA+2], p[0:NA+2])
+    {
 	/*
 	 * --------------------------------------------------------------------
 	 * rho = r.r
 	 * now, obtain the norm of r: First, sum squares of r elements locally...
 	 * --------------------------------------------------------------------
 	 */
-#ifdef GPU_OFFLOADING
     #pragma omp target teams distribute parallel for reduction(+:rho)
-#endif
 	for(j = 0; j < lastcol - firstcol + 1; j++){
 		rho = rho + r[j]*r[j];
 	}
-#ifdef GPU_OFFLOADING
-    #pragma omp target update from(rho)
-#endif
 	/* the conj grad iteration loop */
 	for(cgit = 1; cgit <= cgitmax; cgit++){
 		/*
@@ -512,40 +513,28 @@ static void conj_grad(int colidx[],
 		 * the unrolled-by-8 version below is significantly faster
 		 * on the Cray t3d - overall speed of code is 1.5 times faster.
 		 */
-#ifdef GPU_OFFLOADING
-        #pragma omp target update to(p[0:NA+2]) 
-#endif
+        GPU_PRAGMA(omp target update to(p[0:NA+2]))
         for(j = 0; j < lastrow - firstrow + 1; j++){
 			sum = 0.0;
-#ifdef GPU_OFFLOADING
-            // #pragma omp target teams distribute parallel for reduction(+:sum) nowait
-#endif
+            GPU_PRAGMA(omp target teams distribute parallel for reduction(+:sum) nowait)
 			for(k = rowstr[j]; k < rowstr[j+1]; k++){
 				sum = sum + a[k]*p[colidx[k]];
 			}
-#ifdef GPU_OFFLOADING
-            #pragma omp target update from(sum)
-#endif
+            GPU_PRAGMA(omp target update from(sum))
 			q[j] = sum;
-		}
-#ifdef GPU_OFFLOADING
-        #pragma omp target update to(q[0:NA+2])
-#endif
+        }
+        GPU_PRAGMA(omp target update to(q[0:NA+2]))
 		/*
 		 * --------------------------------------------------------------------
 		 * obtain p.q
 		 * --------------------------------------------------------------------
 		 */
 		d = 0.0;
-#ifdef GPU_OFFLOADING
+        #pragma omp target update to(p[0:NA+2], q[0:NA+2])
         #pragma omp target teams distribute parallel for reduction(+:d)
-#endif
 		for (j = 0; j < lastcol - firstcol + 1; j++) {
 			d += p[j]*q[j];
 		}
-#ifdef GPU_OFFLOADING
-        #pragma omp target update from(d)
-#endif
 		/*
 		 * --------------------------------------------------------------------
 		 * obtain alpha = rho / (p.q)
@@ -567,56 +556,43 @@ static void conj_grad(int colidx[],
 		 * ---------------------------------------------------------------------
 		 */
 		rho = 0.0;
-#ifdef GPU_OFFLOADING
-        #pragma omp target update to(alpha)
-        #pragma omp target teams distribute parallel for 
-#endif
+        // #pragma omp target enter data map(to: alpha, p[0:NA+2], q[0:NA+2], z[0:NA+2], r[0:NA+2])
+        // #pragma omp target teams distribute parallel for
+        #pragma omp target update to(r[0:NA+2], z[0:NA+2])
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			z[j] = z[j] + alpha*p[j];
 			r[j] = r[j] - alpha*q[j];
 		}
-
+        // #pragma omp target exit data map(from: alpha, p[0:NA+2], q[0:NA+2], z[0:NA+2], r[0:NA+2])
 		/*
 		 * ---------------------------------------------------------------------
 		 * rho = r.r
 		 * now, obtain the norm of r: first, sum squares of r elements locally...
 		 * ---------------------------------------------------------------------
 		 */
-#ifdef GPU_OFFLOADING
-        #pragma omp target update to(rho)
+        #pragma omp target update to(r[0:NA+2])
         #pragma omp target teams distribute parallel for reduction(+:rho)
-#endif
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			rho = rho + r[j]*r[j];
 		}
-#ifdef GPU_OFFLOADING
-        #pragma omp target update from(rho)
-#endif
 		/*
 		 * ---------------------------------------------------------------------
 		 * obtain beta
 		 * ---------------------------------------------------------------------
 		 */
 		beta = rho / rho0;
-#ifdef GPU_OFFLOADING
-        #pragma omp target update to(beta)
-#endif
 		/*
 		 * ---------------------------------------------------------------------
 		 * p = r + beta*p
 		 * ---------------------------------------------------------------------
 		 */
-#ifdef GPU_OFFLOADING
         #pragma omp target teams distribute parallel for
-#endif
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			p[j] = r[j] + beta*p[j];
 		}
+        #pragma omp target update from(p[0:NA+2])
 	} /* end of do cgit=1, cgitmax */
-#ifdef GPU_OFFLOADING
-    #pragma omp target update from(z[0:NA+2])
-#endif
-
+    
 	/*
 	 * ---------------------------------------------------------------------
 	 * compute residual norm explicitly: ||r|| = ||x - A.z||
@@ -627,15 +603,11 @@ static void conj_grad(int colidx[],
 	sum = 0.0;
 	for(j = 0; j < lastrow - firstrow + 1; j++){
 		d = 0.0;
-#ifdef GPU_OFFLOADING
-        // #pragma omp target teams distribute parallel for reduction(+:d) nowait
-#endif
+        // GPU_PRAGMA(omp target teams distribute parallel for reduction(+:d) nowait)
 		for(k = rowstr[j]; k < rowstr[j+1]; k++){
 			d = d + a[k]*z[colidx[k]];
 		}
-#ifdef GPU_OFFLOADING
-            #pragma omp target update from(d)
-#endif
+        GPU_PRAGMA(omp target update from(d))
 		r[j] = d;
 	}
 	/*
@@ -643,22 +615,17 @@ static void conj_grad(int colidx[],
 	 * at this point, r contains A.z
 	 * ---------------------------------------------------------------------
 	 */
-#ifdef GPU_OFFLOADING
-    #pragma omp target update to(sum, r[0:NA+2])
-    #pragma omp target teams distribute parallel for reduction(+:sum)
-#endif
+    } // end of omp target data
+    GPU_PRAGMA(omp target update to(sum, r[0:NA+2]))
+    GPU_PRAGMA(omp target teams distribute parallel for reduction(+:sum))
 	for(j = 0; j < lastcol-firstcol+1; j++){
 		d   = x[j] - r[j];
 		sum = sum + d*d;
 	}
-#ifdef GPU_OFFLOADING
-    #pragma omp target update from(sum)
-#endif
+    GPU_PRAGMA(omp target update from(sum))
 	*rnorm = sqrt(sum);
-
-#ifdef GPU_OFFLOADING
-    #pragma omp target exit data map(from: r[0:NA+2], p[0:NA+2], q[0:NA+2])
-#endif
+    
+    GPU_PRAGMA(omp target exit data map(from: r[0:NA+2], p[0:NA+2], q[0:NA+2]))
 }
 
 /*
