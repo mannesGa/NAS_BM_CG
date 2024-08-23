@@ -612,19 +612,22 @@ static void conj_grad(int colidx[],
 		}
 		r[j] = d;
 	}
-	/*
+    } // end of omp target data
+    /*
 	 * ---------------------------------------------------------------------
 	 * at this point, r contains A.z
 	 * ---------------------------------------------------------------------
 	 */
     // #pragma omp target update to(r[0:NA+2]) device(1)
-    #pragma omp target teams distribute parallel for reduction(+:sum) device(1)
+        
+    // #pragma omp target teams distribute parallel for reduction(+:sum) device(1)
+    #pragma omp parallel for reduction(+:sum)
 	for(j = 0; j < lastcol-firstcol+1; j++){
 		d   = x[j] - r[j];
 		sum = sum + d*d;
 	}
 	*rnorm = sqrt(sum);
-    } // end of omp target data
+    
 }
 
 /*
