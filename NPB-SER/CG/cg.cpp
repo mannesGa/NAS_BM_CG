@@ -485,8 +485,9 @@ static void conj_grad(int colidx[],
 		r[j] = x[j];
 		p[j] = r[j];
 	}
-    #pragma omp target data map(to: r[0:NA+2], q[0:NA+2], a[0:NZ], rowstr[0:NA+1], colidx[0:NZ])\
-                            map(tofrom: z[0:NA+2], p[0:NA+2])
+    #pragma omp target data map(to: a[0:NZ], rowstr[0:NA+1], colidx[0:NZ], x[0:NA+2]) \
+                            map(tofrom: r[0:NA+2], p[0:NA+2], z[0:NA+2], q[0:NA+2]) \
+                            device(1)
     {
 	/*
 	 * --------------------------------------------------------------------
@@ -494,7 +495,8 @@ static void conj_grad(int colidx[],
 	 * now, obtain the norm of r: First, sum squares of r elements locally...
 	 * --------------------------------------------------------------------
 	 */
-    #pragma omp target teams distribute parallel for reduction(+:rho)
+    // #pragma omp target teams distribute parallel for reduction(+:rho) device(1)
+    #pragma omp parallel for reduction(+:rho)
 	for(j = 0; j < lastcol - firstcol + 1; j++){
 		rho = rho + r[j]*r[j];
 	}
@@ -513,7 +515,8 @@ static void conj_grad(int colidx[],
 		 * the unrolled-by-8 version below is significantly faster
 		 * on the Cray t3d - overall speed of code is 1.5 times faster.
 		 */
-        #pragma omp target teams distribute parallel for
+        // #pragma omp target update to(p[0:NA+2], q[0:NA+2])
+        #pragma omp target teams distribute parallel for device(1)
         for(j = 0; j < lastrow - firstrow + 1; j++){
 			sum = 0.0;
 			for(k = rowstr[j]; k < rowstr[j+1]; k++){
@@ -521,14 +524,16 @@ static void conj_grad(int colidx[],
 			}
 			q[j] = sum;
         }
+        #pragma omp target update from(q[0:NA+2]) device(1)
 		/*
 		 * --------------------------------------------------------------------
 		 * obtain p.q
 		 * --------------------------------------------------------------------
 		 */
 		d = 0.0;
-        #pragma omp target update to(p[0:NA+2], q[0:NA+2])
-        #pragma omp target teams distribute parallel for reduction(+:d)
+        // #pragma omp target update to(q[0:NA+2], p[0:NA+2])
+        // #pragma omp target teams distribute parallel for reduction(+:d) device(1)
+        #pragma omp parallel for reduction(+:d)
 		for (j = 0; j < lastcol - firstcol + 1; j++) {
 			d += p[j]*q[j];
 		}
@@ -553,22 +558,22 @@ static void conj_grad(int colidx[],
 		 * ---------------------------------------------------------------------
 		 */
 		rho = 0.0;
-        // #pragma omp target enter data map(to: alpha, p[0:NA+2], q[0:NA+2], z[0:NA+2], r[0:NA+2])
-        // #pragma omp target teams distribute parallel for
-        #pragma omp target update to(r[0:NA+2], z[0:NA+2])
+        // #pragma omp target update to(r[0:NA+2], z[0:NA+2]) device(1)
+        #pragma omp target teams distribute parallel for device(1)
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			z[j] = z[j] + alpha*p[j];
 			r[j] = r[j] - alpha*q[j];
 		}
-        // #pragma omp target exit data map(from: alpha, p[0:NA+2], q[0:NA+2], z[0:NA+2], r[0:NA+2])
+        #pragma omp target update from(r[0:NA+2]) device(1)
 		/*
 		 * ---------------------------------------------------------------------
 		 * rho = r.r
 		 * now, obtain the norm of r: first, sum squares of r elements locally...
 		 * ---------------------------------------------------------------------
 		 */
-        #pragma omp target update to(r[0:NA+2])
-        #pragma omp target teams distribute parallel for reduction(+:rho)
+        // #pragma omp target update to(r[0:NA+2])
+        // #pragma omp target teams distribute parallel for reduction(+:rho) device(1)
+        #pragma omp parallel for reduction(+:rho)
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			rho = rho + r[j]*r[j];
 		}
@@ -583,11 +588,11 @@ static void conj_grad(int colidx[],
 		 * p = r + beta*p
 		 * ---------------------------------------------------------------------
 		 */
-        #pragma omp target teams distribute parallel for
+        #pragma omp target teams distribute parallel for device(1)
 		for(j = 0; j < lastcol - firstcol + 1; j++){
 			p[j] = r[j] + beta*p[j];
 		}
-        #pragma omp target update from(p[0:NA+2])
+        #pragma omp target update from(p[0:NA+2]) device(1)
 	} /* end of do cgit=1, cgitmax */
     
 	/*
@@ -598,7 +603,8 @@ static void conj_grad(int colidx[],
 	 * ---------------------------------------------------------------------
 	 */
 	sum = 0.0;
-    #pragma omp target teams distribute parallel for
+    // #pragma omp target update to(z[0:NA+2]) device(1)
+    #pragma omp target teams distribute parallel for device(1)
 	for(j = 0; j < lastrow - firstrow + 1; j++){
 		d = 0.0;
 		for(k = rowstr[j]; k < rowstr[j+1]; k++){
@@ -611,8 +617,8 @@ static void conj_grad(int colidx[],
 	 * at this point, r contains A.z
 	 * ---------------------------------------------------------------------
 	 */
-    
-    #pragma omp target teams distribute parallel for reduction(+:sum)
+    // #pragma omp target update to(r[0:NA+2]) device(1)
+    #pragma omp target teams distribute parallel for reduction(+:sum) device(1)
 	for(j = 0; j < lastcol-firstcol+1; j++){
 		d   = x[j] - r[j];
 		sum = sum + d*d;
